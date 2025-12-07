@@ -176,10 +176,9 @@ export const loginGoogle = async (req: Request, res: Response) => {
     }
 
     // Dados vindos do Google
-    const username = user.userAuth.username || user.userAuth.emails[0].value.split('@')[0];
     const email = user.userAuth.emails[0].value;
     const provider_id = user.provider_id || user.id;
-    const name = user.userAuth.displayName || username;
+    const name = user.userAuth.displayName || email.split('@')[0];
 
     let userInDb = await prisma.user.findFirst({
         where: { email },
@@ -191,13 +190,11 @@ export const loginGoogle = async (req: Request, res: Response) => {
 
     if (!userInDb && create === 'true') {
         let possibleUsername = await generateUniqueDomain(name);
-        if (!possibleUsername) {
-            possibleUsername = await generateUniqueDomain(username);
-        }
+
         const newUser = await prisma.user.create({
             data: {
                 name,
-                username: possibleUsername!,
+                username: possibleUsername || email.split('@')[0] + Math.floor(1000 + Math.random() * 9000).toString(),
                 email,
                 provider: "google",
                 provider_id,
