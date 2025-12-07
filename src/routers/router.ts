@@ -2,13 +2,15 @@ import express from "express";
 import { createUser, getUser, updateUser, UserLoged } from "../controller/User";
 import dotenv from 'dotenv';
 import { verifyAuthentication } from "../middleware/userLoged";
-import { login, sendCodeVerification } from "../controller/Auth";
+import { login, loginGoogle, sendCodeVerification } from "../controller/Auth";
 import { send } from "process";
 import passport from "passport";
 import { getUserRepos } from "../controller/github";
 import { createWorkspace, getWorkspace, updateWorkspace } from "../controller/Workspace";
 import { createProject, getMyProjects, getProject } from "../controller/Project";
 dotenv.config();
+
+
 
 const router = express.Router();
 
@@ -25,8 +27,12 @@ router.get('/auth/github/callback', passport.authenticate('github', { failureRed
     res.json({ token });
 });
 
+// {{GOOGLE AUTH ROUTES}}
+router.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+router.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: '/auth/google' }), loginGoogle);
+
 // Github 
-router.get('/github/list/repo',  getUserRepos);
+router.get('/github/list/repo', verifyAuthentication, getUserRepos);
 
 // {{USER ROUTES}}
 router.post('/user/create', createUser);

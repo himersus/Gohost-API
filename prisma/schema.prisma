@@ -9,12 +9,13 @@ datasource db {
 
 model User {
   id            String           @id @default(uuid())
-  email         String?          @unique
+  email         String           @unique
   name          String
   username      String           @unique
   password      String
   confirme_code String?
   avatar        String?
+  github_token  String?
   provider      Provider?        @default(local)
   provider_id   String?
   is_active     Boolean          @default(false)

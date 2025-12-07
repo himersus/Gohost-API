@@ -9,6 +9,8 @@ import session from "express-session";
 import passport from "passport";
 import cors from "cors";
 import "./auth/github";
+import "./auth/googleAuth";
+
 
 dotenv.config();
 

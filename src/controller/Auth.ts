@@ -6,6 +6,7 @@ import { generateUniqueDomain } from "../modify/domain";
 import jwt from "jsonwebtoken"
 import { PrismaClient } from "@prisma/client";
 import { sendEmail } from "../middleware/sendemail";
+import CryptoJS from 'crypto-js';
 
 
 const prisma = new PrismaClient();
@@ -38,11 +39,11 @@ export const login = async (req: Request, res: Response) => {
         const token = jwt.sign(payload, process.env.JWT_SECRET as string);
 
         res.status(200).json({ token });
-    } catch (error : any) {
+    } catch (error: any) {
         return res.status(500).json({
-             message: "O login falhou",
-             error: error.message
-            });
+            message: "O login falhou",
+            error: error.message
+        });
     }
 };
 
@@ -131,15 +132,83 @@ export const logingitHub = async (req: Request, res: Response) => {
         where: { OR: [{ email }, { provider_id }, { username }] },
     });
 
+    if (!userInDb) {
+        return res.status(404).json({ message: "Usuário não encontrado" });
+    }
+
+
+    const encrypted = CryptoJS.AES.encrypt(
+        user.token,
+        process.env.TOKEN_SECRET!
+    ).toString();
+
+    await prisma.user.update({
+        where: { id: userInDb.id },
+        data: { github_token: encrypted }
+    });
+
     const payload = {
-        id : userInDb?.id,
-        is_active : userInDb?.is_active,
-        username : userInDb?.username,
-        email : userInDb?.email,
-        provider: "github",
-        token_git: user.token
+        id: userInDb?.id,
+        is_active: userInDb?.is_active,
+        username: userInDb?.username,
+        email: userInDb?.email,
+        provider: "github"
     };
-    
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET as string);
+    return res.redirect(`${process.env.FRONTEND_URL}/auth/success?token=${token}`);
+};
+
+
+export const loginGoogle = async (req: Request, res: Response) => {
+    const user: any = req.user;
+    const create = req.query.create as string || 'false';
+
+    if (!user) {
+        return res.status(401).json({ message: "Usuário não autenticado" });
+    }
+
+    // Dados vindos do Google
+    const username = user.userAuth.username || user.userAuth.emails[0].value.split('@')[0];
+    const email = user.userAuth.emails[0].value;
+    const provider_id = user.provider_id || user.id;
+    const name = user.userAuth.displayName || username;
+
+    let userInDb = await prisma.user.findFirst({
+        where: { email },
+    });
+
+    if (!userInDb && create === 'false') {
+        return res.status(404).json({ message: "Usuário não encontrado" });
+    }
+
+    if (!userInDb && create === 'true') {
+        let possibleUsername = await generateUniqueDomain(name);
+        if (!possibleUsername) {
+            possibleUsername = await generateUniqueDomain(username);
+        }
+        const newUser = await prisma.user.create({
+            data: {
+                name,
+                username: possibleUsername!,
+                email,
+                provider: "google",
+                provider_id,
+                password: Math.random().toString(36).slice(-8), // senha aleatória
+                is_active: true,
+            }
+        });
+        userInDb = newUser;
+    }
+
+    const payload = {
+        id: userInDb?.id,
+        is_active: userInDb?.is_active,
+        username: userInDb?.username,
+        email: userInDb?.email,
+        provider: "google"
+    };
+
     const token = jwt.sign(payload, process.env.JWT_SECRET as string);
     return res.redirect(`${process.env.FRONTEND_URL}/auth/success?token=${token}`);
 };
