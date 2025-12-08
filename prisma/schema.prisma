@@ -15,6 +15,7 @@ model User {
   password      String
   confirme_code String?
   avatar        String?
+  roleUser      roleUser         @default(user)
   github_token  String?
   provider      Provider?        @default(local)
   provider_id   String?
@@ -71,6 +72,7 @@ model payment {
   projectId    String
   date_start   DateTime?
   date_end     DateTime?
+  time_in_day  Int?          @default(0)
   type_payment typePayment
   qty_months   Int
   amount       Float
@@ -118,4 +120,9 @@ enum typePayment {
   daily
   monthly
   yearly
+}
+
+enum roleUser {
+  admin
+  user
 }

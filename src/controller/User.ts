@@ -18,11 +18,24 @@ export const createUser = async (req: Request, res: Response) => {
     }
 
     try {
+        const existUser = await prisma.user.findFirst({
+            where: {
+                OR: [
+                    { email },
+                    { username }
+                ]
+            },
+        });
+
+        if (existUser) {
+            return res.status(400).json({ message: "Usuário com este email ou username já existe." });
+        }
+
         const user = await prisma.user.create({
             data: {
                 email,
                 name,
-                password : await bcrypt.hash(password, 10),
+                password: await bcrypt.hash(password, 10),
                 username: username as string,
             }
         });
@@ -33,16 +46,16 @@ export const createUser = async (req: Request, res: Response) => {
 };
 
 export const getUser = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const { userId } = req.params;
     try {
-     
+
         const user = await prisma.user.findFirst({
-            where: { 
-               OR: [
-                { id: validate(id) ? id : undefined },
-                { username: id },
-                { email: id }
-               ]
+            where: {
+                OR: [
+                    { id: validate(userId) ? userId : undefined },
+                    { username: userId },
+                    { email: userId }
+                ]
             },
         });
 
@@ -54,6 +67,36 @@ export const getUser = async (req: Request, res: Response) => {
         res.status(500).json({ error: "Failed to retrieve user" });
     }
 };
+
+export const getAllUsers = async (req: Request, res: Response) => {
+    const { username } = req.query;
+
+    if (username && typeof username !== 'string') {
+        return res.status(400).json({ message: "Username inválido" });
+    }
+
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const skip = (page - 1) * limit;
+    try {
+        const users = await prisma.user.findMany({
+            where: {
+                username: {
+                    contains: username ? username as string : undefined,
+                    mode: "insensitive"
+                },
+            },
+            skip,
+            take: limit,
+            orderBy: {
+                createdAt: 'desc'
+            }
+        });
+        res.status(200).json(users);
+    } catch (error) {
+        res.status(500).json({ error: "Failed to retrieve users" });
+    }
+}
 
 export const UserLoged = async (req: Request | any, res: Response) => {
     const userId = req.userId; // Supondo que o ID do usuário logado esteja disponível em req.userId
@@ -73,30 +116,30 @@ export const UserLoged = async (req: Request | any, res: Response) => {
     }
 };
 
-export const updateUser = async (req: Request, res: Response) => {
-    const { id } = req.params;
+export const updateUser = async (req: Request | any, res: Response) => {
+    const userId = req.userId;
     const { email, name } = req.body;
 
     const existUser = await prisma.user.findFirst({
-        where: { 
-              OR: [
-                { id: validate(id) ? id : undefined },
-                { username: id },
-                { email: id }
-               ]
+        where: {
+            OR: [
+                { id: validate(userId) ? userId : undefined },
+                { username: userId },
+                { email: userId }
+            ]
         },
     });
 
     if (!existUser) {
         return res.status(404).json({ message: "Usuário não encontrado" });
     }
-    
+
     try {
         const user = await prisma.user.update({
-            where: { id },
+            where: { id: existUser.id },
             data: {
-                email : email || existUser.email,
-                name : name || existUser.name
+                email: email || existUser.email,
+                name: name || existUser.name
             }
         });
         res.status(200).json(user);

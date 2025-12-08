@@ -65,11 +65,26 @@ export const createWorkspace = async (req: Request | any, res: Response) => {
     }
 };
 
-export const getWorkspace = async (req: Request, res: Response) => {
-    const { workspaceIdid } = req.params;
+export const getWorkspace = async (req: Request | any, res: Response) => {
+    const { workspaceId } = req.params;
+    const userId = req.userId;
+
+    if (!validate(workspaceId) || !validate(userId)) {
+        return res.status(400).json({ message: "Invalid workspace ID" });
+    }
+    const existUserInWorkspace = await prisma.user_workspace.findFirst({
+        where: {
+            userId: userId,
+            workspaceId: workspaceId,
+        }
+    });
+
+    if (!existUserInWorkspace) {
+        return res.status(403).json({ message: "Você não tem permissão para acessar este workspace" });
+    }
     try {
         const workspace = await prisma.workspace.findUnique({
-            where: { id: workspaceIdid },
+            where: { id: workspaceId },
         });
 
         if (!workspace) {
@@ -77,15 +92,64 @@ export const getWorkspace = async (req: Request, res: Response) => {
         }
         res.status(200).json(workspace);
     } catch (error) {
-        res.status(500).json({ error: "Failed to retrieve workspace" });
+        res.status(500).json({ message: "Failed to retrieve workspace" });
     }
 };
 
-export const updateWorkspace = async (req: Request, res: Response) => {
+export const getAllWorkspaces = async (req: Request | any, res: Response) => {
+    const userId = req.userId;
+    try {
+        const workspaces = await prisma.user_workspace.findMany({
+            where: {
+                userId: userId
+            }
+        });
+
+        const workspaceIds = workspaces.map((uw) => uw.workspaceId);
+        const allWorkspaces = await prisma.workspace.findMany({
+            where: {
+                id: {
+                    in: workspaceIds
+                }
+            }
+        });
+        res.status(200).json(allWorkspaces);
+    } catch (error) {
+        res.status(500).json({ error: "Failed to retrieve workspaces" });
+    }
+}
+
+export const updateWorkspace = async (req: Request | any, res: Response) => {
     const { workspaceId } = req.params;
+    const userId = req.userId;
     const { name } = req.body;
 
+    if (!validate(workspaceId) || !validate(userId)) {
+        return res.status(400).json({ message: "Invalid workspace ID" });
+    }
+    const existUserInWorkspace = await prisma.user_workspace.findFirst({
+        where: {
+            userId: userId,
+            workspaceId: workspaceId,
+        }
+    });
+
+    if (!existUserInWorkspace) {
+        return res.status(403).json({ message: "Você não tem permissão para atualizar este workspace" });
+    }
+
     try {
+        const existWorkspace = await prisma.workspace.findFirst({
+            where: {
+                NOT: [{ id: workspaceId }],
+                name: name
+            },
+        });
+
+        if (existWorkspace) {
+            return res.status(400).json({ message: "Já existe um workspace com este nome" });
+        }
+
         const workspace = await prisma.workspace.update({
             where: { id: workspaceId },
             data: {
@@ -94,7 +158,7 @@ export const updateWorkspace = async (req: Request, res: Response) => {
         });
         res.status(200).json(workspace);
     } catch (error) {
-        res.status(500).json({ error: "Failed to update workspace" });
+        res.status(500).json({ message: "Failed to update workspace" });
     }
 };
 
@@ -123,6 +187,6 @@ export const deleteWorkspace = async (req: Request | any, res: Response) => {
 
         res.status(200).json({ message: "Workspace deleted successfully" });
     } catch (error) {
-        res.status(500).json({ error: "Failed to delete workspace" });
+        res.status(500).json({ message: "Failed to delete workspace" });
     }
 };

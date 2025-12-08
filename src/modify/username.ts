@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 
+const prisma = new PrismaClient();
 
 
 
@@ -29,9 +30,9 @@ export async function generateUniqueUsername(fullName: string, is_auth20: boolea
         else if (counter > 1 && lastName.length - 1 > counter) {
             username = `${firstName}-${lastName.slice(0, counter)}`;
         }
-        //const userExists = await usernameExists(username);
-        //if (!userExists)
-        return username;
+        const userExists = await usernameExists(username);
+        if (!userExists)
+            return username;
         counter++;
     }
     username = `${baseUsername}-${randomNumber}`;
