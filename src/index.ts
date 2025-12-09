@@ -4,7 +4,7 @@ import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import express from "express";
 import dotenv from 'dotenv';
-import router from "./routers/router";
+import router from "./routers/apiRouter";
 import session from "express-session";
 import passport from "passport";
 import cors from "cors";
@@ -34,7 +34,6 @@ app.use(cors({
 app.get('/', (req, res) => {
     res.send('Welcome to the Gohost API!');
 });
-
 
 app.use('/api/v1', router);
 
