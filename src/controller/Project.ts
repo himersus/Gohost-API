@@ -35,7 +35,6 @@ export const createProject = async (req: Request | any, res: Response) => {
         if (!existUser) {
             return res.status(404).json({ message: "Usuário não encontrado" });
         }
-
         if (!existUser.github_id || !existUser.github_token || !existUser.github_username) {
             return res.status(400).json({ message: "Informações do GitHub são obrigatórias, tente sincronizar com o github" });
         }
