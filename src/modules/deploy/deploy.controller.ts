@@ -31,6 +31,32 @@ export const getDeploy = async (req: Request | any, res: Response) => {
   }
 };
 
+export const getDeployLogs = async (req: Request | any, res: Response) => {
+  try {
+    const deployId = req.params.deployId;
+    const userId = req.userId;
+
+    const result = await service.getDeployLogs(deployId, userId);
+    res.status(200).json(result);
+  } catch (error: any) {
+    const status = error.status || 500;
+    res.status(status).json({ message: error.message || "Falha ao obter logs" });
+  }
+};
+
+export const cancelDeploy = async (req: Request | any, res: Response) => {
+  try {
+    const deployId = req.params.deployId;
+    const userId = req.userId;
+
+    const result = await service.cancelDeploy(deployId, userId);
+    res.status(200).json(result);
+  } catch (error: any) {
+    const status = error.status || 500;
+    res.status(status).json({ message: error.message || "Falha ao cancelar deploy" });
+  }
+};
+
 export const deployApp = async (req: Request | any, res: Response) => {
   try {
     const { app, image, port } = req.body;

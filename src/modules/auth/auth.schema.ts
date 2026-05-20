@@ -14,6 +14,17 @@ export const verifyCodeSchema = z.object({
     code: z.string().length(6, "O código deve conter exatamente 6 caracteres"),
 });
 
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1, "Token é obrigatório"),
+  password: z.string().min(6, "A senha deve ter pelo menos 6 caracteres"),
+});
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().email("Email inválido"),
+});
+
 export type LoginUserInput = z.infer<typeof loginUserSchema>;
 export type SendCodeVerificationInput = z.infer<typeof sendCodeVerificationSchema>;
 export type VerifyCodeInput = z.infer<typeof verifyCodeSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;

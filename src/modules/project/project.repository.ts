@@ -116,3 +116,10 @@ export async function findProjectWithDeploy(projectId: string) {
     },
   });
 }
+
+export async function updateProjectDeployToken(id: string, token: string) {
+  return prisma.project.update({
+    where: { id },
+    data: { deploy_token: token },
+  });
+}

@@ -12,7 +12,9 @@ model user {
   name            String
   username        String           @unique
   password        String?          @default("")
-  confirm_code    String?
+  confirm_code        String?
+  reset_token         String?
+  reset_token_expires DateTime?
   avatar          String?
   roleUser        roleUser         @default(user)
   github_token    String?

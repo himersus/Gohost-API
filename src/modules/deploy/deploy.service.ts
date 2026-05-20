@@ -166,3 +166,41 @@ export async function deployApp(
     throw { status: 500, message: error.message };
   }
 }
+
+export async function getDeployLogs(deployId: string, userId: string) {
+  const deploy = await repo.findDeployWithProject(deployId);
+  if (!deploy) throw { status: 404, message: "Deploy não encontrado" };
+
+  const workspace = await repo.findUserWorkspace(userId, deploy.projectId);
+  if (!workspace) {
+    throw { status: 403, message: "Você não tem acesso a este deploy" };
+  }
+
+  return { logs: deploy.logs, status: deploy.status, success: deploy.success };
+}
+
+export async function cancelDeploy(deployId: string, userId: string) {
+  const deploy = await repo.findDeployWithProject(deployId);
+  if (!deploy) throw { status: 404, message: "Deploy não encontrado" };
+
+  const workspace = await repo.findUserWorkspace(userId, deploy.projectId);
+  if (!workspace) {
+    throw { status: 403, message: "Você não tem acesso a este deploy" };
+  }
+
+  const containerName = deploy.Project.subdomain;
+
+  try {
+    runDockerCommand(`docker stop ${containerName} || true`);
+  } catch {
+    // container may not exist
+  }
+
+  await repo.updateDeployStatus(deployId, {
+    status: "stopped",
+    success: false,
+    logs: [...deploy.logs, "Deploy cancelado pelo utilizador"],
+  });
+
+  return { message: "Deploy cancelado com sucesso" };
+}

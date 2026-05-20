@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { encryptToken } from "../../utils/crypt";
@@ -27,6 +28,30 @@ export async function loginUser(username: string, password: string) {
   };
 
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "1d" });
+}
+
+export async function forgotPassword(email: string) {
+  const user = await repo.findUserByEmail(email);
+  if (!user) {
+    throw { status: 404, message: "Usuário não encontrado" };
+  }
+
+  const resetToken = crypto.randomUUID();
+  const expires = new Date(Date.now() + 60 * 60 * 1000);
+
+  await repo.setResetToken(email, resetToken, expires);
+
+  return resetToken;
+}
+
+export async function resetPassword(token: string, newPassword: string) {
+  const user = await repo.findUserByResetToken(token);
+  if (!user) {
+    throw { status: 400, message: "Token inválido ou expirado" };
+  }
+
+  const hashed = await bcrypt.hash(newPassword, 10);
+  await repo.updatePassword(user.id, hashed);
 }
 
 export async function sendVerificationCode(email: string) {

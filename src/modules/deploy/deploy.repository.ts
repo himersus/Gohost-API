@@ -61,3 +61,10 @@ export async function updateDeployStatus(
     data: data as any,
   });
 }
+
+export async function findDeployWithProject(deployId: string) {
+  return prisma.deploy.findUnique({
+    where: { id: deployId },
+    include: { Project: true },
+  });
+}

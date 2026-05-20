@@ -92,6 +92,46 @@ export const loginGitHub = async (req: Request | any, res: Response) => {
   }
 };
 
+export const forgotPassword = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: "Email é obrigatório" });
+
+    const resetToken = await service.forgotPassword(email);
+
+    await sendEmail(
+      email,
+      "Recuperação de Senha - DrenoDay",
+      "Recuperação de Senha",
+      resetToken,
+      `Seu token de recuperação é: <strong>${resetToken}</strong>. Este token expira em 1 hora.`,
+    );
+
+    res.status(200).json({ message: "Email de recuperação enviado com sucesso" });
+  } catch (error: any) {
+    const status = error.status || 500;
+    res.status(status).json({ message: error.message || "Erro ao recuperar senha" });
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) {
+      return res.status(400).json({ message: "Token e nova senha são obrigatórios" });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ message: "A senha deve ter pelo menos 6 caracteres" });
+    }
+
+    await service.resetPassword(token, password);
+    res.status(200).json({ message: "Senha redefinida com sucesso" });
+  } catch (error: any) {
+    const status = error.status || 500;
+    res.status(status).json({ message: error.message || "Erro ao redefinir senha" });
+  }
+};
+
 export const loginGoogle = async (req: Request | any, res: Response) => {
   try {
     const userProfile: any = req.user;

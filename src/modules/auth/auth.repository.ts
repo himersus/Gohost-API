@@ -42,3 +42,30 @@ export async function updateUserGithub(
 ) {
   return prisma.user.update({ where: { id }, data });
 }
+
+export async function findUserByResetToken(token: string) {
+  return prisma.user.findFirst({
+    where: { reset_token: token, reset_token_expires: { gte: new Date() } },
+  });
+}
+
+export async function setResetToken(email: string, token: string, expires: Date) {
+  return prisma.user.update({
+    where: { email },
+    data: { reset_token: token, reset_token_expires: expires },
+  });
+}
+
+export async function clearResetToken(id: string) {
+  return prisma.user.update({
+    where: { id },
+    data: { reset_token: null, reset_token_expires: null },
+  });
+}
+
+export async function updatePassword(id: string, hashedPassword: string) {
+  return prisma.user.update({
+    where: { id },
+    data: { password: hashedPassword, reset_token: null, reset_token_expires: null },
+  });
+}

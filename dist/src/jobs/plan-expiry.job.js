@@ -8,14 +8,11 @@ exports.startPlanExpiryJob = void 0;
 const node_cron_1 = __importDefault(require("node-cron"));
 const prisma_1 = __importDefault(require("../lib/prisma"));
 const child_process_1 = require("child_process");
-const path_1 = __importDefault(require("path"));
-const crypt_1 = require("../utils/crypt");
 const sendemail_1 = require("../middleware/sendemail");
 const stopExpiredProjects = async () => {
     console.log("[cron] A verificar planos expirados...");
     try {
         const userMap = new Map();
-        // Busca projetos cujo plano expirou e ainda estão rodando
         const expiredProjects = await prisma_1.default.project.findMany({
             where: {
                 run_status: true,
@@ -26,7 +23,6 @@ const stopExpiredProjects = async () => {
             select: {
                 id: true,
                 subdomain: true,
-                path: true, // caminho do docker-compose
                 date_expire: true,
                 user: {
                     select: {
@@ -54,33 +50,28 @@ const stopExpiredProjects = async () => {
                 });
             }
         }
-        // Para cada projeto expirado
         await Promise.allSettled(expiredProjects.map(async (project) => {
-            const targetPath = path_1.default.resolve((0, crypt_1.decryptEnv)(project.path));
-            return new Promise((resolve) => {
-                (0, child_process_1.exec)("docker-compose down --rmi all", { cwd: targetPath }, async (error, stdout, stderr) => {
-                    if (error) {
-                        console.error(`[cron error] ${project.subdomain}: ${stderr}`);
-                        resolve();
-                        return;
-                    }
-                    await prisma_1.default.project.update({
-                        where: { id: project.id },
-                        data: { run_status: false },
-                    });
-                    await prisma_1.default.notification.create({
-                        data: {
-                            userId: project.user.id,
-                            title: "Plano Expirado",
-                            message: `O plano do seu projeto '${project.subdomain}' expirou e ele foi parado. Entre em contato para renovar ou atualizar seu plano.`,
-                            type: "warning",
-                        },
-                    });
-                    await (0, sendemail_1.sendEmailWhenPlanExpires)(project.user.email, project.user.name, "Plano Expirado - Projeto Parado", `Olá ${project.user.name},\n\nO plano do seu projeto '${project.subdomain}' expirou e ele foi parado automaticamente. Para continuar usando nossos serviços, por favor, renove ou atualize seu plano.\n\nAtenciosamente,\nEquipe DrenoDay`);
-                    console.log(`[cron] Projeto '${project.subdomain}' parado por expiração de plano.`);
-                    resolve();
+            try {
+                (0, child_process_1.execSync)(`docker stop ${project.subdomain} || true`, { timeout: 30000 });
+                (0, child_process_1.execSync)(`docker rm ${project.subdomain} || true`, { timeout: 30000 });
+                await prisma_1.default.project.update({
+                    where: { id: project.id },
+                    data: { run_status: false },
                 });
-            });
+                await prisma_1.default.notification.create({
+                    data: {
+                        userId: project.user.id,
+                        title: "Plano Expirado",
+                        message: `O plano do seu projeto '${project.subdomain}' expirou e ele foi parado. Entre em contato para renovar ou atualizar seu plano.`,
+                        type: "warning",
+                    },
+                });
+                await (0, sendemail_1.sendEmailWhenPlanExpires)(project.user.email, project.user.name, "Plano Expirado - Projeto Parado", `Olá ${project.user.name},\n\nO plano do seu projeto '${project.subdomain}' expirou e ele foi parado automaticamente. Para continuar usando nossos serviços, por favor, renove ou atualize seu plano.\n\nAtenciosamente,\nEquipe DrenoDay`);
+                console.log(`[cron] Projeto '${project.subdomain}' parado por expiração de plano.`);
+            }
+            catch (error) {
+                console.error(`[cron error] ${project.subdomain}:`, error);
+            }
         }));
     }
     catch (error) {

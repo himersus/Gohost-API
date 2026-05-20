@@ -12,6 +12,8 @@ import {
   decryptGithubToken,
   validateGithubRepo,
   verifyGithubSession,
+  getDeployToken as getTokenService,
+  regenerateDeployToken as regenTokenService,
   stopProject,
   fetchUserById,
   createMember,
@@ -120,6 +122,36 @@ export const stopTheProject = async (req: Request | any, res: Response) => {
     res.status(200).json({ message: "Projeto parado com sucesso" });
   } catch {
     res.status(500).json({ message: "Erro ao parar projeto" });
+  }
+};
+
+export const getDeployToken = async (req: Request | any, res: Response) => {
+  try {
+    const projectId = q(req.params.projectId);
+    const userId = req.userId;
+    if (!validate(projectId) || !validate(userId)) {
+      return res.status(400).json({ message: "ID inválido" });
+    }
+    const result = await getTokenService(projectId, userId);
+    res.status(200).json(result);
+  } catch (error: any) {
+    const status = error.status || 500;
+    res.status(status).json({ message: error.message || "Erro ao obter token" });
+  }
+};
+
+export const regenerateDeployToken = async (req: Request | any, res: Response) => {
+  try {
+    const projectId = q(req.params.projectId);
+    const userId = req.userId;
+    if (!validate(projectId) || !validate(userId)) {
+      return res.status(400).json({ message: "ID inválido" });
+    }
+    const result = await regenTokenService(projectId, userId);
+    res.status(200).json(result);
+  } catch (error: any) {
+    const status = error.status || 500;
+    res.status(status).json({ message: error.message || "Erro ao regenerar token" });
   }
 };
 

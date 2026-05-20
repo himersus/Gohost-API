@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { execSync } from "child_process";
 import { decryptToken } from "../../utils/crypt";
 import { parseGithubRepo, repositoryUsesDocker } from "../../utils/github";
@@ -56,6 +57,27 @@ export async function verifyGithubSession(token: string): Promise<void> {
 }
 
 export { fetchUserById, createMember };
+
+export async function getDeployToken(projectId: string, userId: string) {
+  const project = await repo.findProjectById(projectId);
+  if (!project) throw { status: 404, message: "Projeto não encontrado" };
+  if (project.userId !== userId) {
+    throw { status: 403, message: "Você não tem permissão para ver este token" };
+  }
+  return { deploy_token: project.deploy_token };
+}
+
+export async function regenerateDeployToken(projectId: string, userId: string) {
+  const project = await repo.findProjectById(projectId);
+  if (!project) throw { status: 404, message: "Projeto não encontrado" };
+  if (project.userId !== userId) {
+    throw { status: 403, message: "Você não tem permissão para regenerar este token" };
+  }
+
+  const newToken = crypto.randomUUID();
+  await repo.updateProjectDeployToken(projectId, newToken);
+  return { deploy_token: newToken };
+}
 
 export async function stopProject(projectId: string, userId: string) {
   const project = await repo.findProjectById(projectId);
