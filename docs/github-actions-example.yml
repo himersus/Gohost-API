@@ -1,0 +1,39 @@
+name: Deploy para DrenoDay
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Login no GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build da imagem Docker
+        run: |
+          docker build -t ghcr.io/${{ github.repository }}:${{ github.sha }} .
+
+      - name: Push da imagem para o Registry
+        run: |
+          docker push ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+      - name: Notificar a plataforma DrenoDay
+        run: |
+          curl -X POST https://drenoday.enor.tech/api/v1/deploy \
+            -H "Authorization: Bearer ${{ secrets.PLATFORM_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "app": "${{ secrets.APP_NAME }}",
+              "image": "ghcr.io/${{ github.repository }}:${{ github.sha }}",
+              "port": 3000
+            }'

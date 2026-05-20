@@ -1,140 +1,60 @@
-import prisma from "../../lib/prisma";
 import { Request, Response } from "express";
 import { validate } from "uuid";
 import { q } from "../../utils/to_string";
+import * as service from "./notification.service";
 
 export const myNotifications = async (req: Request | any, res: Response) => {
-    const page = parseInt(q(req.query.page) || "1");
-    const per_page = parseInt(q(req.query.per_page) || "10");
+  try {
     const userId = req.userId;
+    const page = parseInt(q(req.query.page) || "1");
+    const perPage = parseInt(q(req.query.per_page) || "10");
 
     if (!validate(userId)) {
-        return res.status(400).json({ message: "ID do usuário inválido" });
+      return res.status(400).json({ message: "ID do usuário inválido" });
     }
-    try {
-        const existUser = await prisma.user.findFirst({
-            where: { id: userId }
-        });
-        if (!existUser) {
-            return res.status(404).json({ message: "Usuário não encontrado" });
-        }
 
-        if (existUser.roleUser == "admin") {
-            const notifications = await prisma.notification.findMany({
-                where: {
-                    OR: [
-                        { userId: null },
-                        { userId: userId },
-                    ]
-                },
-                orderBy: {
-                    createdAt: 'desc',
-                },
-            });
-            return res.status(200).json(notifications);
-        }
+    const user = req.user;
+    const isAdmin = user?.roleUser === "admin";
 
-        const notifications = await prisma.notification.findMany({
-            where: {
-                userId: userId,
-            },
-            orderBy: {
-                createdAt: 'desc',
-            },
-            skip: (page - 1) * per_page,
-            take: per_page,
-        });
-
-        const totalNotifications = await prisma.notification.count({
-            where: {
-                userId: userId,
-            },
-        });
-
-        return res.status(200).json({
-            data: notifications,
-            meta: {
-                page: page,
-                per_page: per_page,
-                total: totalNotifications,
-                total_pages: Math.ceil(totalNotifications / per_page),
-            }
-        });
-    } catch (error) {
-        console.error("Error fetching notifications:", error);
-        return res.status(500).json({ message: "Erro ao buscar notificações" });
-    }
+    const result = await service.listNotifications(userId, page, perPage, isAdmin);
+    res.status(200).json(result);
+  } catch (error: any) {
+    res.status(500).json({ message: error.message || "Erro ao buscar notificações" });
+  }
 };
 
 export const markNotificationAsRead = async (req: Request | any, res: Response) => {
-    const { notificationId } = q(req.params);
+  try {
+    const notificationId = q(req.params.notificationId);
     const userId = req.userId;
+    const isAdmin = req.user?.roleUser === "admin";
 
     if (!validate(notificationId)) {
-        return res.status(400).json({ message: "ID da notificação inválido" });
+      return res.status(400).json({ message: "ID da notificação inválido" });
     }
 
-    try {
-        const existUser = await prisma.user.findFirst({
-            where: { id: userId }
-        });
-        if (!existUser) {
-            return res.status(404).json({ message: "Usuário não encontrado" });
-        }
-        const notification = await prisma.notification.findFirst({
-            where: { id: notificationId }
-        });
-
-        if (!notification) {
-            return res.status(404).json({ message: "Notificação não encontrada" });
-        }
-
-        if (existUser.roleUser !== "admin" && notification.userId !== userId) {
-            return res.status(403).json({ message: "Você não tem permissão para marcar esta notificação como lida" });
-        }
-
-        await prisma.notification.update({
-            where: { id: notificationId },
-            data: { read: true }
-        });
-
-        return res.status(200).json({ message: "Notificação marcada como lida" });
-    } catch (error) {
-        console.error("Error marking notification as read:", error);
-        return res.status(500).json({ message: "Erro ao marcar notificação como lida" });
-    }
+    await service.markAsRead(notificationId, userId, isAdmin);
+    res.status(200).json({ message: "Notificação marcada como lida" });
+  } catch (error: any) {
+    const status = error.status || 500;
+    res.status(status).json({ message: error.message || "Erro ao marcar notificação como lida" });
+  }
 };
 
 export const getOneNotification = async (req: Request | any, res: Response) => {
-    const { notificationId } = q(req.params);
+  try {
+    const notificationId = q(req.params.notificationId);
     const userId = req.userId;
+    const isAdmin = req.user?.roleUser === "admin";
 
     if (!validate(notificationId)) {
-        return res.status(400).json({ message: "ID da notificação inválido" });
+      return res.status(400).json({ message: "ID da notificação inválido" });
     }
 
-    try {
-        const existUser = await prisma.user.findFirst({
-            where: { id: userId }
-        });
-        if (!existUser) {
-            return res.status(404).json({ message: "Usuário não encontrado" });
-        }
-        const notification = await prisma.notification.findFirst({
-            where: { id: notificationId }
-        });
-
-        if (!notification) {
-            return res.status(404).json({ message: "Notificação não encontrada" });
-        }
-
-        if (existUser.roleUser !== "admin" && notification.userId !== userId) {
-            return res.status(403).json({ message: "Você não tem permissão para ver esta notificação" });
-        }
-
-        return res.status(200).json(notification);
-    } catch (error) {
-        console.error("Error fetching notification:", error);
-        return res.status(500).json({ message: "Erro ao buscar notificação" });
-    }
+    const notification = await service.getNotification(notificationId, userId, isAdmin);
+    res.status(200).json(notification);
+  } catch (error: any) {
+    const status = error.status || 500;
+    res.status(status).json({ message: error.message || "Erro ao buscar notificação" });
+  }
 };

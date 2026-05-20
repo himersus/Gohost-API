@@ -1,109 +1,47 @@
 import { Request, Response } from "express";
-import { validate } from "uuid";
-import { q } from "../../utils/to_string";
-import prisma from "../../lib/prisma";
+import * as service from "./deploy.service";
 
 export const listDeploys = async (req: Request | any, res: Response) => {
-  const projectId = q(req.params.projectId) as string;
-  const userId = req.userId;
-  const page = parseInt(q(req.query.page) || "1");
-  const per_page = parseInt(q(req.query.per_page) || "10");
-
-  if (!userId || !validate(userId)) {
-    return res.status(401).json({ message: "Usuário não autenticado" });
-  }
-
-  const existUser = await prisma.user.findUnique({
-    where: { id: userId },
-  });
-
-  if (!existUser) {
-    return res.status(404).json({ message: "Usuário não encontrado" });
-  }
-
-  const exitProject = await prisma.project.findUnique({
-    where: { id: projectId },
-  });
-
-  if (!exitProject) {
-    return res.status(404).json({ message: "Projeto não encontrado" });
-  }
-
   try {
-    const deploys = await prisma.deploy.findMany({
-      where: { projectId },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * per_page,
-      take: per_page,
-    });
+    const projectId = req.params.projectId;
+    const userId = req.userId;
+    const page = parseInt(req.query.page as string) || 1;
+    const perPage = parseInt(req.query.per_page as string) || 10;
 
-    const totalDeploys = await prisma.deploy.count({
-      where: { projectId },
-    });
-
-    const totalPages = Math.ceil(totalDeploys / per_page);
-
-    res.status(200).json({
-      data: deploys,
-      meta: {
-        page,
-        per_page,
-        total: totalDeploys,
-        total_pages: totalPages,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Failed to list deploys" });
+    const result = await service.listDeploys(projectId, userId, { page, perPage });
+    res.status(200).json(result);
+  } catch (error: any) {
+    const status = error.status || 500;
+    const message = error.message || "Falha ao listar deploys";
+    res.status(status).json({ message });
   }
 };
 
 export const getDeploy = async (req: Request | any, res: Response) => {
-  const deployId = q(req.params.deployId);
-  const userId = req.userId;
-  if (!userId || !validate(userId)) {
-    return res.status(401).json({ message: "Usuário não autenticado" });
-  }
-
-  const existUser = await prisma.user.findUnique({
-    where: { id: userId },
-  });
-
-  if (!existUser) {
-    return res.status(404).json({ message: "Usuário não encontrado" });
-  }
-
-  const exitDeploy = await prisma.deploy.findUnique({
-    where: { id: deployId },
-  });
-
-  if (!exitDeploy) {
-    return res.status(404).json({ message: "Deploy não encontrado" });
-  }
-
-  const exitProject = await prisma.project.findUnique({
-    where: { id: exitDeploy.projectId },
-  });
-
-  if (!exitProject) {
-    return res.status(404).json({ message: "Projeto não encontrado" });
-  }
-
-  const userWorkspace = await prisma.user_workspace.findFirst({
-    where: {
-      userId,
-      projectId: exitProject.id,
-    },
-  });
-
-  if (!userWorkspace) {
-    return res
-      .status(403)
-      .json({ message: "Você não tem acesso a este deploy" });
-  }
-
   try {
-    res.status(200).json(exitDeploy);
-  } catch (error) {
-    res.status(500).json({ message: "Failed to get deploy" });
+    const deployId = req.params.deployId;
+    const userId = req.userId;
+
+    const deploy = await service.getDeploy(deployId, userId);
+    res.status(200).json(deploy);
+  } catch (error: any) {
+    const status = error.status || 500;
+    const message = error.message || "Falha ao buscar deploy";
+    res.status(status).json({ message });
+  }
+};
+
+export const deployApp = async (req: Request | any, res: Response) => {
+  try {
+    const { app, image, port } = req.body;
+
+    const result = await service.deployApp(app, image, port || 3000);
+    res.status(200).json(result);
+  } catch (error: any) {
+    const status = error.status || 500;
+    res.status(status).json({
+      ok: false,
+      error: error.message || "Falha ao executar deploy",
+    });
   }
 };

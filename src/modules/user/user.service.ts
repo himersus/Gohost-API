@@ -1,33 +1,19 @@
-import { validate } from "uuid";
+import * as repo from "./user.repository";
 import prisma from "../../lib/prisma";
 
 export async function fetchUserById(userId: string) {
-  if (!validate(userId) || !userId) return null;
-
-  return prisma.user.findFirst({
-    where: {
-      OR: [
-        { id: validate(userId) ? userId : undefined },
-        { username: userId },
-        { email: userId },
-      ],
-    },
-  });
+  return repo.findUserByAny(userId);
 }
 
 export async function createMember(userId: string, projectId: string) {
-  const existUser = await fetchUserById(userId);
+  const user = await repo.findUserByAny(userId);
   const project = await prisma.project.findUnique({ where: { id: projectId } });
 
-  if (!existUser || !project) {
+  if (!user || !project) {
     throw new Error("User or project not found");
   }
 
   await prisma.user_workspace.create({
-    data: {
-      userId: existUser.id,
-      projectId: project.id,
-      role: "master",
-    },
+    data: { userId: user.id, projectId: project.id, role: "master" },
   });
 }

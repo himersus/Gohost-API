@@ -70,6 +70,7 @@ model project {
   run_status           Boolean          @default(false)
   start_cmd            String?
   technology           technology?      @default(docker)
+  deploy_token         String           @default(uuid()) @unique
   default_plan         String?
   default_type_payment typePayment      @default(monthly)
   userId               String

@@ -1,9 +1,7 @@
 // src/jobs/planExpiry.job.ts
 import cron from "node-cron";
 import prisma from "../lib/prisma";
-import { exec } from "child_process";
-import path from "path";
-import { decryptEnv } from "../utils/crypt";
+import { execSync } from "child_process";
 import { sendEmailWhenPlanExpires } from "../middleware/sendemail";
 import { ExpiredProject } from "./types";
 
@@ -18,7 +16,7 @@ const stopExpiredProjects = async () => {
         projects: ExpiredProject[];
       }
     >();
-    // Busca projetos cujo plano expirou e ainda estão rodando
+
     const expiredProjects = await prisma.project.findMany({
       where: {
         run_status: true,
@@ -29,7 +27,6 @@ const stopExpiredProjects = async () => {
       select: {
         id: true,
         subdomain: true,
-        path: true, // caminho do docker-compose
         date_expire: true,
         user: {
           select: {
@@ -62,50 +59,37 @@ const stopExpiredProjects = async () => {
       }
     }
 
-    // Para cada projeto expirado
     await Promise.allSettled(
       expiredProjects.map(async (project: ExpiredProject) => {
-        const targetPath = path.resolve(decryptEnv(project.path));
+        try {
+          execSync(`docker stop ${project.subdomain} || true`, { timeout: 30_000 });
+          execSync(`docker rm ${project.subdomain} || true`, { timeout: 30_000 });
 
-        return new Promise<void>((resolve) => {
-          exec(
-            "docker-compose down --rmi all",
-            { cwd: targetPath },
-            async (error, stdout, stderr) => {
-              if (error) {
-                console.error(`[cron error] ${project.subdomain}: ${stderr}`);
-                resolve();
-                return;
-              }
+          await prisma.project.update({
+            where: { id: project.id },
+            data: { run_status: false },
+          });
 
-              await prisma.project.update({
-                where: { id: project.id },
-                data: { run_status: false },
-              });
-
-              await prisma.notification.create({
-                data: {
-                  userId: project.user.id,
-                  title: "Plano Expirado",
-                  message: `O plano do seu projeto '${project.subdomain}' expirou e ele foi parado. Entre em contato para renovar ou atualizar seu plano.`,
-                  type: "warning",
-                },
-              });
-
-              await sendEmailWhenPlanExpires(
-                project.user.email,
-                project.user.name,
-                "Plano Expirado - Projeto Parado",
-                `Olá ${project.user.name},\n\nO plano do seu projeto '${project.subdomain}' expirou e ele foi parado automaticamente. Para continuar usando nossos serviços, por favor, renove ou atualize seu plano.\n\nAtenciosamente,\nEquipe DrenoDay`,
-              );
-
-              console.log(
-                `[cron] Projeto '${project.subdomain}' parado por expiração de plano.`,
-              );
-              resolve();
+          await prisma.notification.create({
+            data: {
+              userId: project.user.id,
+              title: "Plano Expirado",
+              message: `O plano do seu projeto '${project.subdomain}' expirou e ele foi parado. Entre em contato para renovar ou atualizar seu plano.`,
+              type: "warning",
             },
+          });
+
+          await sendEmailWhenPlanExpires(
+            project.user.email,
+            project.user.name,
+            "Plano Expirado - Projeto Parado",
+            `Olá ${project.user.name},\n\nO plano do seu projeto '${project.subdomain}' expirou e ele foi parado automaticamente. Para continuar usando nossos serviços, por favor, renove ou atualize seu plano.\n\nAtenciosamente,\nEquipe DrenoDay`,
           );
-        });
+
+          console.log(`[cron] Projeto '${project.subdomain}' parado por expiração de plano.`);
+        } catch (error) {
+          console.error(`[cron error] ${project.subdomain}:`, error);
+        }
       }),
     );
   } catch (error) {
