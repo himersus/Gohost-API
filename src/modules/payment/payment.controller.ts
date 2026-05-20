@@ -1,0 +1,552 @@
+import { Request, Response } from "express";
+import { validate } from "uuid";
+import { PaymentStatus } from "@prisma/client";
+import { sendSocketContent } from "../../sockets";
+import axios from "axios";
+import { referenceSendPaymentService, verificationPayment } from "./payment.service";
+import { createNotification } from "../notification/notification.service";
+import { q } from "../../utils/to_string";
+import prisma from "../../lib/prisma";
+import { runProject } from "../project/project.service";
+
+const generateMerchantId = (): string => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let merchantId = "";
+  for (let i = 0; i < 15; i++) {
+    merchantId += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return merchantId;
+};
+
+export const referenceSendPaymentGateway = async (
+  req: Request | any,
+  res: Response,
+) => {
+  try {
+    const { description, projectId, plan_name } = req.body;
+    const userId = req.userId;
+
+    const verifyPayRaw: any = await verificationPayment(
+      userId,
+      projectId,
+      plan_name,
+    );
+    if (verifyPayRaw.code != 200) {
+      return res.status(verifyPayRaw.code || 400).json({
+        message: verifyPayRaw.message,
+      });
+    }
+
+    const verifyPay = verifyPayRaw.data;
+
+    const merchantId = generateMerchantId();
+
+    const data: any = await referenceSendPaymentService(
+      merchantId,
+      1,
+      description,
+    );
+    if (data.code != 200) {
+      return res.status(data.code || 400).json({
+        message: data.message || "Erro ao criar referência de pagamento",
+      });
+    }
+
+    const createPayment = await prisma.payment.create({
+      data: {
+        userId: userId,
+        planId: verifyPay.plan_id,
+        plan_name: verifyPay.plan_name,
+        amount: 0,
+        time_in_day: verifyPay.time_in_day || 0,
+        entity: data.data.entity,
+        ref: data.data.referenceNumber,
+        merchant: merchantId,
+        status: "pending",
+        type_payment: verifyPay.type_payment,
+        projectId: projectId,
+      },
+    });
+
+    sendSocketContent("new_payment", {
+      userId: userId,
+      paymentId: createPayment.id,
+      amount: verifyPay.amount,
+      plan_name: verifyPay.plan_name,
+      status: "pending",
+    });
+    return res.status(200).json(data);
+  } catch (error: any) {
+    console.error("[referenceSendPaymentGateway]", error);
+
+    return res.status(500).json({ message: "Erro ao criar referência de pagamento" });
+  }
+};
+
+export const getAppyPayToken = async (req: Request, res: Response) => {
+  try {
+    const params = new URLSearchParams();
+    params.append("grant_type", "client_credentials");
+    params.append("client_id", process.env.PG_API_CLIENT_ID!);
+    params.append("client_secret", process.env.PG_API_SECRET!);
+    params.append("resource", process.env.PG_RESOURCE_ID!);
+
+    const response = await axios.post(
+      `https://login.microsoftonline.com/auth.appypay.co.ao/oauth2/token`,
+      params,
+      {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      },
+    );
+
+    return res.status(200).json(response.data);
+  } catch (error: any) {
+    console.error("[getAppyPayToken]", error.response?.data || error);
+    return res.status(500).json({ message: "Erro ao obter token de pagamento" });
+  }
+};
+
+export const webhookPayment = async (req: Request, res: Response) => {
+  const payload = req.body;
+
+  if (!payload) {
+    await createNotification(null, "Webhook Error", "Payload inválido");
+    return res.status(400).json({ message: "Payload inválido" });
+  }
+
+  const { merchantTransactionId, reference, responseStatus } = payload;
+
+  if (!responseStatus || !reference) {
+    await createNotification(null, "Webhook Error", "Payload inválido");
+    return res.status(400).json({ message: "Payload inválido" });
+  }
+
+  if (responseStatus.code !== 100) {
+    return res.status(200).json({ received: true });
+  }
+
+  const referenceNumber = reference.referenceNumber;
+  if (!referenceNumber && !merchantTransactionId) {
+    await createNotification(null, "Webhook Error", "Referência ausente");
+    return res.status(400).json({ message: "Referência ausente" });
+  }
+
+  const existPayment = await prisma.payment.findFirst({
+    where: {
+      OR: [{ merchant: merchantTransactionId }, { ref: referenceNumber }],
+    },
+  });
+
+  if (!existPayment) {
+    await createNotification(
+      null,
+      "Falha no pagamento",
+      "Pagamento não encontrado",
+    );
+    return res.status(200).json({ received: true });
+  }
+
+  if (existPayment.status === "approved") {
+    return res.status(200).json({ received: true });
+  }
+
+  const userId = existPayment.userId;
+
+  if (!userId || !validate(userId)) {
+    await createNotification(
+      null,
+      "Falha no pagamento",
+      "Usuário do pagamento não autenticado para o webhook recebido.",
+    );
+    return res.status(401).json({ message: "Usuário não autenticado" });
+  }
+
+  const existUser = await prisma.user.findFirst({
+    where: { id: userId },
+  });
+
+  if (!existUser) {
+    await createNotification(
+      null,
+      "Falha no pagamento",
+      "Usuário do pagamento não encontrado para o webhook recebido.",
+    );
+    return res.status(404).json({ message: "Usuário não encontrado" });
+  }
+
+  let payment_form = existPayment.type_payment;
+  const currentDate = new Date();
+  const dateStart = new Date(currentDate);
+  const expirationDate = new Date(currentDate);
+  if (payment_form === "monthly") {
+    expirationDate.setMonth(expirationDate.getMonth() + 1);
+  } else if (payment_form === "yearly") {
+    expirationDate.setFullYear(expirationDate.getFullYear() + 1);
+  } else {
+    await createNotification(
+      userId,
+      "Falha no pagamento",
+      "Forma de pagamento inválida no webhook recebido.",
+    );
+    return res.status(400).json({
+      message: "Forma de pagamento inválida",
+    });
+  }
+  await prisma.project.update({
+    where: {
+      id: existPayment.projectId,
+    },
+    data: {
+      date_expire: expirationDate,
+    },
+  });
+
+  await prisma.payment.update({
+    where: { id: existPayment.id },
+    data: {
+      date_start: dateStart,
+      date_end: expirationDate,
+      status: "approved",
+    },
+  });
+
+  sendSocketContent("confirmed_payment", {
+    userId: userId,
+    paymentId: existPayment.id,
+    status: "Pago",
+    message: "Pagamento realizado com sucesso",
+  });
+  await createNotification(
+    existPayment.userId,
+    "Sucesso",
+    "Pagamento realizado com sucesso.",
+  );
+  res.status(200).json({ message: "Webhook recebido com sucesso" });
+};
+
+export const confirmPayment = async (req: Request | any, res: Response) => {
+  const userId = req.userId;
+  const { paymentId, status } = req.body;
+
+  if (!userId || !validate(userId)) {
+    return res.status(401).json({ message: "Usuário não autenticado" });
+  }
+
+  if (status !== "approved" && status !== "rejected" && status !== "failed") {
+    return res.status(400).json({ message: "Status de pagamento inválido" });
+  }
+
+  const existUser = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!existUser) {
+    return res.status(404).json({ message: "Usuário não encontrado" });
+  }
+
+  const existPayment = await prisma.payment.findUnique({
+    where: { id: paymentId },
+  });
+
+  if (!existPayment) {
+    return res.status(404).json({ message: "Pagamento não encontrado" });
+  }
+
+  const existProject = await prisma.project.findUnique({
+    where: { id: existPayment.projectId },
+  });
+
+  if (!existProject) {
+    return res
+      .status(404)
+      .json({ message: "Projeto do pagamento não encontrado" });
+  }
+  const currentDate = new Date();
+  const expirationDate = new Date(
+    currentDate.getTime() + (existProject.days || 1) * 24 * 60 * 60 * 1000,
+  );
+
+  await prisma.project.update({
+    where: {
+      id: existPayment.projectId,
+    },
+    data: {
+      date_last_payment: currentDate,
+      date_expire: expirationDate,
+      status_payment: status,
+    },
+  });
+
+  try {
+    await prisma.payment.update({
+      where: { id: paymentId },
+      data: {
+        date_start: currentDate,
+        date_end: expirationDate,
+        status: status,
+      },
+    });
+
+    sendSocketContent("confirmed_payment", {
+      userId: userId,
+      paymentId: paymentId,
+      status: status == "approved" ? "Pago" : "Rejeitado",
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(400).json({ message: "Erro ao confirmar pagamento" });
+  }
+
+  try {
+    const runResponse = await runProject(existProject.id, existProject.userId);
+
+    await prisma.project.update({
+      where: { id: existProject.id },
+      data: { repo_saved: true },
+    });
+
+    if (runResponse) {
+      return res
+        .status(runResponse.statusCode)
+        .json({ message: runResponse.message });
+    }
+
+    res.status(400).json({
+      message: "O pagamento foi confirmado, tente rodar o projecto manualmente",
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Erro ao registrar pagamento" });
+  }
+};
+
+export const createPayment = async (req: Request | any, res: Response) => {
+  const userId = req.userId;
+  const { projectId, proof_payment } = req.body;
+
+  if (validate(!projectId)) {
+    return res.status(400).json({ message: "ID do projeto inválido" });
+  }
+
+  if (!userId || !validate(userId)) {
+    return res.status(401).json({ message: "Usuário não autenticado" });
+  }
+
+  const existUser = await prisma.user.findFirst({
+    where: { id: userId },
+  });
+
+  if (!existUser) {
+    return res.status(404).json({ message: "Usuário não encontrado" });
+  }
+
+  const existProject = await prisma.project.findFirst({
+    where: { id: projectId },
+  });
+
+  if (!existProject) {
+    return res.status(404).json({ message: "Projeto não encontrado" });
+  }
+
+  if (!existProject.default_plan) {
+    return res.status(400).json({ message: "Projeto não tem plano associado" });
+  }
+
+  const existPlan = await prisma.plan.findFirst({
+    where: { name: existProject.default_plan },
+  });
+
+  if (!existPlan) {
+    return res.status(404).json({ message: "Plano não encontrado" });
+  }
+
+  if (!proof_payment || typeof proof_payment !== "string") {
+    return res
+      .status(400)
+      .json({ message: "Comprovante de pagamento inválido" });
+  }
+
+  try {
+    const existPayment = await prisma.payment.findFirst({
+      where: {
+        proof_payment: proof_payment,
+      },
+    });
+
+    if (existPayment) {
+      return res
+        .status(400)
+        .json({ message: "Já existe um pagamento com este comprovante" });
+    }
+
+    const payment = await prisma.payment.create({
+      data: {
+        userId: existUser.id,
+        planId: existPlan.id,
+        plan_name: existPlan.name,
+        amount: existProject.amount_to_pay || 0,
+        proof_payment: proof_payment,
+        time_in_day: existProject.days || 0,
+        status: "pending",
+        type_payment: existProject.default_type_payment,
+        projectId: existProject.id,
+      },
+    });
+
+    await prisma.project.update({
+      where: { id: existProject.id },
+      data: { status_payment: "pending" },
+    });
+
+    sendSocketContent("new_payment", {
+      userId: userId,
+      paymentId: payment.id,
+      amount: existProject.amount_to_pay || 0,
+      plan_name: existPlan.name,
+      status: "Pendente",
+    });
+
+    return res.status(201).json(payment);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Erro ao registrar pagamento" });
+  }
+};
+
+export const getUserPayments = async (req: Request | any, res: Response) => {
+  const userId = req.userId;
+  const status = req.query.status as string | undefined;
+
+  if (
+    status &&
+    status !== "pending" &&
+    status !== "approved" &&
+    status !== "rejected" &&
+    status !== "failed"
+  ) {
+    return res.status(400).json({ message: "Status de pagamento inválido" });
+  }
+
+  if (!userId || !validate(userId)) {
+    return res.status(401).json({ message: "Usuário não autenticado" });
+  }
+
+  const existUser = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!existUser) {
+    return res.status(404).json({ message: "Usuário não encontrado" });
+  }
+
+  try {
+    const payments = await prisma.payment.findMany({
+      where: {
+        userId: userId,
+        status: status ? (status as PaymentStatus) : undefined,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return res.status(200).json(payments);
+  } catch (error) {
+    console.error(error);
+    return res.status(400).json({ message: "Erro ao buscar pagamentos" });
+  }
+};
+
+export const getPaymentById = async (req: Request | any, res: Response) => {
+  const userId = req.userId;
+  const { paymentId } = q(req.params);
+
+  if (!userId || !validate(userId)) {
+    return res.status(401).json({ message: "Usuário não autenticado" });
+  }
+
+  const existUser = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!existUser) {
+    return res.status(404).json({ message: "Usuário não encontrado" });
+  }
+
+  try {
+    const payment = await prisma.payment.findFirst({
+      where: {
+        id: paymentId,
+        userId: userId,
+      },
+    });
+
+    if (!payment) {
+      return res.status(404).json({ message: "Pagamento não encontrado" });
+    }
+
+    return res.status(200).json(payment);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Erro ao buscar pagamento" });
+  }
+};
+
+export const getAllPayments = async (req: Request | any, res: Response) => {
+  const userId = q(req.userId);
+  const page = parseInt(q(req.query.page) as string) || 1;
+  const per_page = parseInt(q(req.query.per_page) as string) || 10;
+  const name_project = q(req.query.name) as string | undefined;
+
+  const rawStatus = req.query.status;
+  const statusList: PaymentStatus[] = rawStatus
+    ? (Array.isArray(rawStatus) ? rawStatus : String(rawStatus).split(","))
+        .map((s: string) => s.trim() as PaymentStatus)
+        .filter(Boolean)
+    : [];
+
+  if (!userId || !validate(userId)) {
+    return res.status(401).json({ message: "Usuário não autenticado" });
+  }
+
+  const existUser = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!existUser) {
+    return res.status(404).json({ message: "Usuário não encontrado" });
+  }
+
+  try {
+    const where = {
+      userId,
+      status: statusList.length > 0 ? { in: statusList } : undefined,
+      project: name_project
+        ? { name: { contains: name_project, mode: "insensitive" as const } }
+        : undefined,
+    };
+
+    const [payments, totalPayments] = await prisma.$transaction([
+      prisma.payment.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * per_page,
+        take: per_page,
+      }),
+      prisma.payment.count({ where }),
+    ]);
+
+    return res.status(200).json({
+      data: payments,
+      meta: {
+        total: totalPayments,
+        page,
+        per_page,
+        total_pages: Math.ceil(totalPayments / per_page),
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Erro ao buscar pagamentos" });
+  }
+};
